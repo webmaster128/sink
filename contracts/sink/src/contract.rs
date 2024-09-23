@@ -1,13 +1,17 @@
+use cosmwasm_std::StdError;
 use cosmwasm_std::{
     entry_point, to_json_binary, BankMsg, CosmosMsg, Deps, DepsMut, Empty, Env, MessageInfo, Order,
     QueryResponse, Response, StdResult,
 };
 use cw2::set_contract_version;
 use cw_storage_plus::Bound;
+use cw_storey::CwStorage;
+use storey::containers::BoundedIterableAccessor;
+use storey::containers::IterableAccessor;
 
 use crate::error::ContractError;
 use crate::msg::{AshesResponse, ExecuteMsg, InstantiateMsg, QueriedAsh, QueryMsg};
-use crate::state::{Ash, ASHES, ASHES_LAST_ID};
+use crate::state::{Ash, ASHES};
 
 #[entry_point]
 pub fn instantiate(
@@ -72,21 +76,19 @@ fn execute_burn(deps: DepsMut, info: MessageInfo, env: Env) -> Result<Response, 
         _ => return Err(ContractError::TooManyCoins),
     };
 
-    let new_id = ASHES_LAST_ID.may_load(deps.storage)?.unwrap_or_default() + 1;
-    ASHES_LAST_ID.save(deps.storage, &new_id)?;
-
     let time = env.block.time;
 
     //store the burner Ash
-    ASHES.save(
-        deps.storage,
-        new_id,
-        &Ash {
+
+    // must_use annotation missing on push?
+    ASHES
+        .access(&mut CwStorage(deps.storage))
+        .push(&Ash {
             burner: Some(burner.clone()),
             amount: amount.clone(),
             time,
-        },
-    )?;
+        })
+        .map_err(|e| ContractError::StorageError)?;
 
     let msg = CosmosMsg::Bank(BankMsg::Burn {
         amount: vec![amount.clone()],
@@ -114,21 +116,17 @@ fn execute_burn_balance(
         return Err(ContractError::NoFundsToBurn);
     }
 
-    let new_id = ASHES_LAST_ID.may_load(deps.storage)?.unwrap_or_default() + 1;
-    ASHES_LAST_ID.save(deps.storage, &new_id)?;
-
     let time = env.block.time;
 
     //store the burner Ash
-    ASHES.save(
-        deps.storage,
-        new_id,
-        &Ash {
+    ASHES
+        .access(&mut CwStorage(deps.storage))
+        .push(&Ash {
             burner: None,
             amount: contract_balance.clone(),
             time,
-        },
-    )?;
+        })
+        .map_err(|e| ContractError::StorageError)?;
 
     let msg = CosmosMsg::Bank(BankMsg::Burn {
         amount: vec![contract_balance.clone()],
@@ -147,16 +145,20 @@ fn query_ashes(
     order: Order,
 ) -> StdResult<AshesResponse> {
     let limit: usize = limit.unwrap_or(100) as usize;
-    let (low_bound, top_bound) = match order {
-        Order::Ascending => (start_after.map(Bound::exclusive), None),
-        Order::Descending => (None, start_after.map(Bound::exclusive)),
-    };
+    // let (low_bound, top_bound) = match order {
+    //     Order::Ascending => (start_after.map(Bound::exclusive), None),
+    //     Order::Descending => (None, start_after.map(Bound::exclusive)),
+    // };
+
+    // support for iteration order missing
+    // support for exclusive bounds missing
 
     let ashes = ASHES
-        .range(deps.storage, low_bound, top_bound, order)
+        .access(&CwStorage(deps.storage))
+        .bounded_pairs::<u32, u32>(start_after, None)
         .take(limit)
         .map(|result| -> StdResult<QueriedAsh> {
-            let (key, ash) = result?;
+            let (key, ash) = result.map_err(|e| StdError::generic_err("Something broken again"))?;
             Ok(QueriedAsh {
                 id: key,
                 burner: ash.burner,
@@ -165,6 +167,20 @@ fn query_ashes(
             })
         })
         .collect::<StdResult<Vec<QueriedAsh>>>()?;
+
+    // let ashes = ASHES
+    //     .range(deps.storage, low_bound, top_bound, order)
+    //     .take(limit)
+    //     .map(|result| -> StdResult<QueriedAsh> {
+    //         let (key, ash) = result?;
+    //         Ok(QueriedAsh {
+    //             id: key,
+    //             burner: ash.burner,
+    //             amount: ash.amount,
+    //             time: ash.time,
+    //         })
+    //     })
+    //     .collect::<StdResult<Vec<QueriedAsh>>>()?;
     Ok(AshesResponse { ashes })
 }
 
@@ -259,25 +275,25 @@ mod tests {
             ashes,
             [
                 QueriedAsh {
-                    id: 1,
+                    id: 0,
                     burner: Some(burner1.clone()),
                     amount: coin(1_000, "unois"),
                     time: DEFAULT_TIME
                 },
                 QueriedAsh {
-                    id: 2,
+                    id: 1,
                     burner: Some(burner2.clone()),
                     amount: coin(2_000, "unois"),
                     time: DEFAULT_TIME
                 },
                 QueriedAsh {
-                    id: 3,
+                    id: 2,
                     burner: Some(burner3.clone()),
                     amount: coin(3_000, "unois"),
                     time: DEFAULT_TIME
                 },
                 QueriedAsh {
-                    id: 4,
+                    id: 3,
                     burner: Some(burner4.clone()),
                     amount: coin(4_000, "unois"),
                     time: DEFAULT_TIME

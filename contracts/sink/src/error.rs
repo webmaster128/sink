@@ -19,4 +19,7 @@ pub enum ContractError {
 
     #[error("There are no funds in the sink contract to burn")]
     NoFundsToBurn,
+
+    #[error("An error during storage access")]
+    StorageError,
 }

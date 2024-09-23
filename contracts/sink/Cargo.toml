@@ -20,3 +20,5 @@ cw-storage-plus = { version = "2" }
 cw2.workspace = true
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
 thiserror = { version = "1.0.23" }
+cw-storey = "0.4.0"
+storey = "0.3.0"
